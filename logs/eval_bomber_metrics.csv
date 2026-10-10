@@ -1,0 +1,11 @@
+episode,steps,humans_survived,zombies_killed,outcome
+1,304,1,0,defeat
+2,309,0,0,defeat
+3,402,0,0,defeat
+4,473,0,0,defeat
+5,440,0,0,defeat
+6,252,0,0,defeat
+7,250,0,0,defeat
+8,314,0,0,defeat
+9,414,0,0,defeat
+10,348,0,0,defeat
