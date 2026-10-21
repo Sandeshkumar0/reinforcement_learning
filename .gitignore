@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+venv_pygame/
+models/smoke_v2/
+logs/smoke_v2/*/

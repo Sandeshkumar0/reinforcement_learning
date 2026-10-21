@@ -1,0 +1,13 @@
+{
+  "width": 240,
+  "height": 240,
+  "num_humans": 1,
+  "num_zombies": 2,
+  "num_bombers": 1,
+  "num_obstacles": 0,
+  "num_safe_zones": 1,
+  "max_steps": 160,
+  "explosion_damage": 60,
+  "explosion_cooldown": 30,
+  "zombie_attack_cooldown": 20
+}

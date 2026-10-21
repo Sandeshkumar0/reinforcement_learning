@@ -1,0 +1,53 @@
+{
+  "purpose": "Integration smoke test only; no claim of policy improvement.",
+  "human_training_steps": 1024,
+  "bomber_training_steps": 1024,
+  "frozen_human_checkpoint_unchanged": true,
+  "evaluation_seeds": [
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109
+  ],
+  "configuration": {
+    "width": 240,
+    "height": 240,
+    "num_humans": 1,
+    "num_zombies": 2,
+    "num_bombers": 1,
+    "num_obstacles": 0,
+    "num_safe_zones": 1,
+    "max_steps": 160,
+    "explosion_damage": 60,
+    "explosion_cooldown": 30,
+    "zombie_attack_cooldown": 20
+  },
+  "mean_metrics": {
+    "trained": {
+      "escape_rate": 0.3,
+      "death_rate": 0.6,
+      "zombie_damage": 28.0,
+      "zombies_killed": 0.1,
+      "useful_explosions": 0.4,
+      "wasted_explosions": 15.7,
+      "human_reward": -99.34859853761245,
+      "bomber_reward": -45.62905592069397
+    },
+    "random": {
+      "escape_rate": 0.1,
+      "death_rate": 0.8,
+      "zombie_damage": 28.0,
+      "zombies_killed": 0.1,
+      "useful_explosions": 0.5,
+      "wasted_explosions": 10.3,
+      "human_reward": -162.42237207249553,
+      "bomber_reward": -58.76704272937919
+    }
+  }
+}
