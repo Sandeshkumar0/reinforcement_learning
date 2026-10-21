@@ -1,0 +1,39 @@
+{
+  "width": 800,
+  "height": 600,
+  "num_humans": 1,
+  "num_zombies": 5,
+  "num_bombers": 1,
+  "num_obstacles": 10,
+  "num_safe_zones": 1,
+  "max_steps": 1000,
+  "human_health": 100,
+  "zombie_health": 100,
+  "zombie_attack_damage": 25,
+  "zombie_attack_range": 12,
+  "zombie_attack_cooldown": 30,
+  "threat_distance": 100,
+  "explosion_radius": 70,
+  "explosion_damage": 60,
+  "explosion_cooldown": 60,
+  "human_reward_weights": {
+    "step": -0.01,
+    "progress": 5.0,
+    "damage": -1.0,
+    "death": -100.0,
+    "escape": 100.0,
+    "danger": -0.05
+  },
+  "bomber_reward_weights": {
+    "step": -0.01,
+    "damage": 0.1,
+    "kill": 10.0,
+    "threat_damage": 0.1,
+    "threat_kill": 10.0,
+    "human_damage": -0.2,
+    "human_death": -50.0,
+    "human_escape": 20.0,
+    "invalid": -1.0,
+    "progress": 2.0
+  }
+}
