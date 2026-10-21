@@ -1,53 +1,22 @@
-import os
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
-from game.environment import ZombieSurvivalEnv
+from rl.training import train_phases
 
-def train_human():
-    os.makedirs("models/human", exist_ok=True)
-    os.makedirs("logs/human", exist_ok=True)
 
-    # Curriculum phases
-    phases = [
-        {
-            "name": "Phase 1: Navigation",
-            "config": {'width': 800, 'height': 600, 'num_humans': 1, 'num_zombies': 0, 'num_bombers': 0, 'num_obstacles': 5, 'num_safe_zones': 1, 'max_steps': 500},
-            "timesteps": 50000
-        },
-        {
-            "name": "Phase 2: One Slow Zombie",
-            "config": {'width': 800, 'height': 600, 'num_humans': 1, 'num_zombies': 1, 'num_bombers': 0, 'num_obstacles': 10, 'num_safe_zones': 1, 'max_steps': 1000},
-            "timesteps": 100000
-        },
-        {
-            "name": "Phase 3: Multiple Zombies",
-            "config": {'width': 800, 'height': 600, 'num_humans': 1, 'num_zombies': 3, 'num_bombers': 0, 'num_obstacles': 15, 'num_safe_zones': 1, 'max_steps': 1000},
-            "timesteps": 150000
-        }
-    ]
+def train_human(timesteps=300000, output='models/human/human_final_phase_3',
+                log_dir='logs/human', seed=0, resume=None, rollout_steps=1024, config=None):
+    if timesteps < 3:
+        raise ValueError('Human training requires at least 3 requested timesteps.')
+    base = dict(num_humans=1, num_bombers=0, num_safe_zones=1, end_on_zombie_clear=False)
+    if resume or config is not None:
+        phases = [dict(name='Survival', config={**base, **(config or {})}, timesteps=timesteps)]
+    else:
+        amounts = [timesteps//6, timesteps//3]
+        amounts.append(timesteps-sum(amounts))
+        phases = [
+            dict(name='Navigation', config={**base, 'num_zombies': 0, 'num_obstacles': 5}, timesteps=max(1, amounts[0])),
+            dict(name='One slow zombie', config={**base, 'num_zombies': 1, 'zombie_speed': 1.0, 'num_obstacles': 10}, timesteps=max(1, amounts[1])),
+            dict(name='Survival', config={**base, 'num_zombies': 3, 'num_obstacles': 15}, timesteps=max(1, amounts[2]))]
+    return train_phases('human', phases, output, log_dir, seed, resume, rollout_steps=rollout_steps)
 
-    model = None
-    
-    for i, phase in enumerate(phases):
-        print(f"\\n--- Starting {phase['name']} ---")
-        env = ZombieSurvivalEnv(config=phase["config"])
-        
-        checkpoint_callback = CheckpointCallback(
-            save_freq=10000, 
-            save_path=f'models/human/phase_{i+1}/',
-            name_prefix='ppo_human'
-        )
 
-        if model is None:
-            model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="logs/human/")
-        else:
-            # Update the environment for the existing model
-            model.set_env(env)
-            
-        model.learn(total_timesteps=phase["timesteps"], callback=checkpoint_callback, reset_num_timesteps=False)
-        model.save(f"models/human/human_final_phase_{i+1}")
-        
-    print("Training Complete. Final model saved to models/human/human_final_phase_3")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     train_human()

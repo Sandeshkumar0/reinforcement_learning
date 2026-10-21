@@ -1,32 +1,21 @@
-import os
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
-from game.environment import BomberCombatEnv
+from pathlib import Path
+from rl.training import train_phases
 
-def train_bomber():
-    os.makedirs("models/bomber", exist_ok=True)
-    os.makedirs("logs/bomber", exist_ok=True)
 
-    config = {
-        'width': 800, 'height': 600, 
-        'num_humans': 1, 'num_zombies': 5, 'num_bombers': 1, 
-        'num_obstacles': 10, 'num_safe_zones': 1, 'max_steps': 1000
-    }
-    
-    print("--- Starting Bomber Training ---")
-    env = BomberCombatEnv(config=config)
-    
-    checkpoint_callback = CheckpointCallback(
-        save_freq=20000, 
-        save_path='models/bomber/checkpoints/',
-        name_prefix='ppo_bomber'
-    )
+def train_bomber(timesteps=200000, human_model_path=None, output='models/bomber/bomber_final',
+                 log_dir='logs/bomber', seed=0, resume=None, rollout_steps=1024, config=None):
+    if timesteps < 1:
+        raise ValueError('timesteps must be positive')
+    if human_model_path is None:
+        default = Path('models/human/human_final_phase_3.zip')
+        if default.exists():
+            human_model_path = str(default)
+    phase = dict(name='Protect humans', config={
+        'num_humans': 1, 'num_zombies': 5, 'num_bombers': 1, 'num_obstacles': 10,
+        **(config or {})}, timesteps=timesteps)
+    return train_phases('bomber', [phase], output, log_dir, seed, resume,
+                        human_model_path, rollout_steps)
 
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="logs/bomber/")
-    # Train for 200k steps to learn combat strategy
-    model.learn(total_timesteps=200000, callback=checkpoint_callback)
-    model.save("models/bomber/bomber_final")
-    print("Training Complete. Final model saved to models/bomber/bomber_final")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     train_bomber()
