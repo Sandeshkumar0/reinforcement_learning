@@ -1,10 +1,39 @@
 # Reinforcement-learning zombie survival
 
-Humans learn to escape and avoid attacks. Reusable bombers learn to protect them by damaging threatening zombies. Zombies use A* pursuit and configurable attacks; they are not trained agents.
+A Python simulation for exploring cooperative reinforcement learning. Humans learn to escape and avoid attacks, while reusable bombers learn when to damage zombies threatening them. Zombies use rule-based A* pursuit and configurable attacks.
+
+The project separates simulation rules, observations, reward attribution, training, and evaluation so the behavior can be tested before running long training jobs. The included short-run comparison is integration evidence, not a claim of reliably trained policies.
+
+## Features and stack
+
+- Configurable health, attack ranges, cooldowns, and same-step bomber rescues.
+- PPO training for humans and bombers, with a frozen human policy during bomber training.
+- Event-based rewards, fixed-size observations, seeded evaluation, and checkpoint resume.
+- A Pygame view of health, threats, explosions, and cooldowns.
+- Python, Gymnasium, Stable-Baselines3/PyTorch, NumPy, Pygame, and pytest.
+
+```text
+game/       Simulation, combat, pathfinding, controllers, and environments
+rl/         Rewards, PPO training, checkpointing, and evaluation
+ui/         Pygame rendering
+tests/      Deterministic regressions and short PPO integration checks
+configs/    Example combat and reward settings
+logs/       Evaluation results and verification reports
+```
+
+## Demo and current results
+
+Run `python main.py --play` after setup for a random-action demonstration; this mode does not train or load a policy. To show learned behavior, train compatible models and use `--evaluate-combined --render` as documented below. There is no hosted browser demo or committed gameplay screenshot yet.
+
+The [verification report](logs/smoke_v2/REPORT.md) records a 1,024-step-per-agent smoke run and a fixed-seed random baseline. Results are mixed: the short-trained pair did not improve zombie damage and made more invalid explosion attempts. Evaluate longer training on held-out seeds before making performance claims.
+
+When adding a screenshot or recording, state whether it uses random actions or a saved policy, and include its configuration and checkpoint. Smoke checkpoints are generated locally by `python -m rl.verify_training`; they are ignored by Git and must be regenerated on a fresh clone.
 
 ## Setup
 
 ```bash
+git clone https://github.com/Sandeshkumar0/reinforcement_learning.git
+cd reinforcement_learning
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
