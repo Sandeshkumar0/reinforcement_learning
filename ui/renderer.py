@@ -1,5 +1,4 @@
 import pygame
-from game.engine import GameEngine
 
 class Renderer:
     def __init__(self, config):
@@ -26,14 +25,24 @@ class Renderer:
             lbl = self.font.render("SAFE", True, (0, 100, 0))
             self.screen.blit(lbl, (sx + sw//2 - 20, sy + sh//2 - 10))
 
+        # Threat lines identify the human a zombie is trying to attack.
+        humans_by_id = {h.id: h for h in state['humans']}
+        for z in state['zombies']:
+            target = humans_by_id.get(z.target)
+            if z.is_alive and z.is_threatening and target:
+                pygame.draw.line(self.screen, (210, 120, 120),
+                                 (int(z.x), int(z.y)), (int(target.x), int(target.y)), 1)
+
         # Draw entities
         for h in state['humans']:
             if h.is_alive and not h.escaped:
                 pygame.draw.circle(self.screen, h.color, (int(h.x), int(h.y)), h.radius)
+                self.draw_health(h)
                 
         for z in state['zombies']:
             if z.is_alive:
                 pygame.draw.circle(self.screen, z.color, (int(z.x), int(z.y)), z.radius)
+                self.draw_health(z)
                 
         for b in state['bombers']:
             if b.is_alive:
@@ -52,6 +61,11 @@ class Renderer:
             f"Zombies Alive: {sum(1 for z in state['zombies'] if z.is_alive)}",
         ]
         
+        if state.get('truncated'):
+            ui_text.append('Outcome: TIMEOUT')
+        if state['bombers']:
+            b = state['bombers'][0]
+            ui_text.append(f"Bomber: {'READY' if b.cooldown == 0 else str(b.cooldown) + ' steps cooldown'}")
         if state['outcome']:
             ui_text.append(f"Outcome: {state['outcome'].upper()}")
             
@@ -61,6 +75,12 @@ class Renderer:
 
         pygame.display.flip()
         self.clock.tick(self.fps)
+
+    def draw_health(self, entity):
+        x, y = int(entity.x)-10, int(entity.y)-entity.radius-7
+        pygame.draw.rect(self.screen, (80, 80, 80), (x, y, 20, 3))
+        pygame.draw.rect(self.screen, (0, 170, 40),
+                         (x, y, round(20*entity.health/entity.max_health), 3))
 
     def process_events(self):
         for event in pygame.event.get():

@@ -1,76 +1,84 @@
+"""Train, resume, evaluate or compare the human and bomber policies."""
 import argparse
-import random
-import pygame
-from game.engine import GameEngine
-from ui.renderer import Renderer
+import json
+from pathlib import Path
+
 
 def run_random_play():
-    config = {
-        'width': 800,
-        'height': 600,
-        'num_humans': 1,
-        'num_zombies': 3,
-        'num_bombers': 1,
-        'num_obstacles': 15,
-        'num_safe_zones': 1,
-        'max_steps': 1000
-    }
-    
-    engine = GameEngine(config)
-    renderer = Renderer(config)
-    
-    running = True
-    while running:
-        running = renderer.process_events()
-        
-        # Generate random actions for testing
-        human_actions = {0: random.randint(0, 8)}
-        
-        bomber_action = random.randint(0, 8)
-        # 5% chance to explode if zombies nearby
-        state = engine.get_state()
-        b = state['bombers'][0]
-        for z in state['zombies']:
-            if z.is_alive and b.distance_to(z) <= b.activation_radius:
-                if random.random() < 0.05:
-                    bomber_action = 9
-                break
-                
-        bomber_actions = {0: bomber_action}
-        
-        new_state = engine.step(human_actions, bomber_actions)
-        renderer.draw_state(new_state)
-        
-        if new_state['outcome'] is not None:
-            # wait 2 seconds then reset
-            pygame.time.wait(2000)
-            engine.reset()
+    import random
+    import pygame
+    from game.engine import GameEngine
+    from ui.renderer import Renderer
+    engine = GameEngine()
+    renderer = Renderer(engine.config)
+    try:
+        while renderer.process_events():
+            state = engine.step({h.id: random.randrange(9) for h in engine.humans},
+                                {b.id: random.randrange(10) for b in engine.bombers})
+            renderer.draw_state(state)
+            if state['outcome'] is not None or state['truncated']:
+                engine.reset()
+    finally:
+        pygame.quit()
+
 
 def main():
-    parser = argparse.ArgumentParser(description="RL Zombie Survival Game")
-    parser.add_argument('--play', action='store_true', help='Run simulation with random actions')
-    parser.add_argument('--train-human', action='store_true', help='Train the human agent using PPO')
-    parser.add_argument('--evaluate-human', action='store_true', help='Evaluate trained human agent')
-    parser.add_argument('--train-bomber', action='store_true', help='Train the bomber agent using PPO')
-    parser.add_argument('--evaluate-bomber', action='store_true', help='Evaluate trained bomber agent')
+    parser = argparse.ArgumentParser(description=__doc__)
+    modes = parser.add_mutually_exclusive_group(required=True)
+    for mode in ('play', 'train-human', 'train-bomber', 'train-all',
+                 'evaluate-human', 'evaluate-bomber', 'evaluate-combined'):
+        modes.add_argument('--'+mode, action='store_true')
+    parser.add_argument('--human-model', default='models/human/human_final_phase_3')
+    parser.add_argument('--bomber-model', default='models/bomber/bomber_final')
+    parser.add_argument('--timesteps', type=int, help='Requested steps per agent (PPO rounds to full rollouts).')
+    parser.add_argument('--rollout-steps', type=int, default=1024)
+    parser.add_argument('--resume', help='Compatible checkpoint; used only with a single training mode.')
+    parser.add_argument('--config', help='JSON object overriding engine config and reward weights.')
+    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--episodes', type=int, default=10)
+    parser.add_argument('--compare', action='store_true', help='Also evaluate random actions on identical seeds.')
+    parser.add_argument('--render', action='store_true')
+    parser.add_argument('--output', help='Evaluation CSV output path.')
     args = parser.parse_args()
-    
+    if args.resume and not (args.train_human or args.train_bomber):
+        parser.error('--resume requires --train-human or --train-bomber')
+    config = json.loads(Path(args.config).read_text()) if args.config else None
+    if args.resume and config is None:
+        from rl.evaluate_headless import checkpoint_config
+        config = checkpoint_config(args.resume) or None
     if args.play:
         run_random_play()
-    elif args.train_human:
+        return
+    if args.train_human or args.train_all:
         from rl.train_human import train_human
-        train_human()
-    elif args.evaluate_human:
-        from rl.evaluate import evaluate
-        evaluate("human", "models/human/human_final_phase_3")
-    elif args.train_bomber:
+        train_human(timesteps=args.timesteps if args.timesteps is not None else 300000,
+                    output=args.human_model, seed=args.seed, resume=args.resume,
+                    rollout_steps=args.rollout_steps, config=config)
+    if args.train_bomber or args.train_all:
         from rl.train_bomber import train_bomber
-        train_bomber()
-    elif args.evaluate_bomber:
-        from rl.evaluate import evaluate
-        evaluate("bomber", "models/bomber/bomber_final")
-    else:
-        print("Please specify a mode. Example: --play, --train-human, --train-bomber, --evaluate-human, --evaluate-bomber")
+        hp = args.human_model
+        if not Path(hp).is_file() and not Path(hp+'.zip').is_file():
+            if hp != 'models/human/human_final_phase_3':
+                parser.error(f'Human checkpoint does not exist: {hp}')
+            hp = None
+        train_bomber(timesteps=args.timesteps if args.timesteps is not None else 200000,
+                     human_model_path=hp, output=args.bomber_model, seed=args.seed,
+                     resume=args.resume, rollout_steps=args.rollout_steps, config=config)
+    if args.evaluate_human or args.evaluate_bomber or args.evaluate_combined:
+        from rl.evaluate_headless import evaluate_policies, write_results
+        if args.episodes < 1:
+            parser.error('--episodes must be positive')
+        mode = 'human' if args.evaluate_human else 'bomber' if args.evaluate_bomber else 'combined'
+        hp = args.human_model
+        if mode == 'bomber' and hp == 'models/human/human_final_phase_3' and not Path(hp+'.zip').exists():
+            hp = None
+        kwargs = dict(mode=mode, human_model_path=hp, bomber_model_path=args.bomber_model,
+                      seeds=range(args.seed, args.seed+args.episodes), config=config)
+        rows = evaluate_policies(**kwargs, render=args.render)
+        if args.compare:
+            rows += evaluate_policies(**kwargs, random_baseline=True)
+        write_results(rows, args.output or f'logs/eval_{mode}_metrics.csv')
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
