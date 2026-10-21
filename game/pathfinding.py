@@ -24,7 +24,8 @@ class PathFinder:
                     self.grid[r][c] = 0
 
     def heuristic(self, a, b):
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        dr, dc = abs(a[0] - b[0]), abs(a[1] - b[1])
+        return max(dr, dc) + (math.sqrt(2) - 1) * min(dr, dc)
 
     def get_path(self, start_pos, goal_pos):
         # Convert to grid coordinates
@@ -73,7 +74,9 @@ class PathFinder:
                     continue
 
                 # Diagonal weight vs orthogonal
-                weight = 1.414 if i != 0 and j != 0 else 1.0
+                if i and j and (self.grid[current[0]+i][current[1]] or self.grid[current[0]][current[1]+j]):
+                    continue  # Do not cut through obstacle corners.
+                weight = math.sqrt(2) if i != 0 and j != 0 else 1.0
                 tentative_g_score = gscore[current] + weight
 
                 if neighbor not in [i[1] for i in oheap] or tentative_g_score < gscore.get(neighbor, float('inf')):

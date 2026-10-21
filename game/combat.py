@@ -1,60 +1,42 @@
+"""One-shot combat effects and immutable, attributable step events."""
+from dataclasses import dataclass
 import math
 
+
+@dataclass(frozen=True)
+class CombatEvent:
+    kind: str
+    actor_id: int = -1
+    target_id: int = -1
+    amount: float = 0.0
+    threatening: bool = False
+
+
 class Explosion:
-    def __init__(self, x, y, radius, duration=10):
-        self.x = x
-        self.y = y
-        self.radius = radius
-        self.duration = duration # Frames it stays active visually
+    def __init__(self, x, y, radius, duration=10, damage=100, owner_id=0):
+        self.x, self.y, self.radius = x, y, radius
+        self.duration, self.damage, self.owner_id = duration, damage, owner_id
         self.active = True
+        self.damage_applied = False
 
     def update(self):
         self.duration -= 1
-        if self.duration <= 0:
-            self.active = False
+        self.active = self.duration > 0
 
-class Arrow:
-    def __init__(self, x, y, dx, dy, speed=5.0):
-        self.x = x
-        self.y = y
-        # normalize dir
-        length = math.hypot(dx, dy)
-        if length > 0:
-            self.dx = dx / length
-            self.dy = dy / length
-        else:
-            self.dx = 1
-            self.dy = 0
-        self.speed = speed
-        self.active = True
-
-    def move(self):
-        self.x += self.dx * self.speed
-        self.y += self.dy * self.speed
 
 def apply_explosion_damage(explosion, zombies):
-    killed = 0
+    """Return damage/kill events once; visual duration never causes more damage."""
+    if explosion.damage_applied:
+        return []
+    explosion.damage_applied = True
+    events = []
     for zombie in zombies:
-        if zombie.is_alive:
-            dist = math.hypot(zombie.x - explosion.x, zombie.y - explosion.y)
-            if dist <= explosion.radius + zombie.radius:
-                zombie.is_alive = False
-                killed += 1
-    return killed
-
-def check_arrow_collisions(arrow, zombies, game_map):
-    # Check map bounds and obstacles
-    if game_map.is_collision(arrow.x, arrow.y, radius=1):
-        arrow.active = False
-        return False
-        
-    for zombie in zombies:
-        if zombie.is_alive:
-            dist = math.hypot(zombie.x - zombie.x, zombie.y - zombie.y)
-            # simpler check
-            dist = math.hypot(arrow.x - zombie.x, arrow.y - zombie.y)
-            if dist <= zombie.radius:
-                zombie.is_alive = False
-                arrow.active = False
-                return True
-    return False
+        if zombie.is_alive and math.hypot(zombie.x - explosion.x, zombie.y - explosion.y) <= explosion.radius:
+            damage = zombie.take_damage(explosion.damage)
+            if damage:
+                events.append(CombatEvent('zombie_damage', explosion.owner_id, zombie.id,
+                                          damage, zombie.is_threatening))
+                if not zombie.is_alive:
+                    events.append(CombatEvent('zombie_killed', explosion.owner_id, zombie.id,
+                                              threatening=zombie.is_threatening))
+    return events

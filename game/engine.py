@@ -1,195 +1,190 @@
+"""Deterministic combat order: cooldowns, humans, zombies, bombers, attacks."""
+import copy
+import math
+import random
 from game.entities import Human, Zombie, Bomber
 from game.map_generator import Map
 from game.pathfinding import PathFinder
-from game.combat import Explosion, apply_explosion_damage
-import random
-import math
+from game.combat import CombatEvent, Explosion, apply_explosion_damage
+
+ACTION_MAP = {0: (0, 0), 1: (0, -1), 2: (1, -1), 3: (1, 0), 4: (1, 1),
+              5: (0, 1), 6: (-1, 1), 7: (-1, 0), 8: (-1, -1)}
+DEFAULT_CONFIG = dict(width=800, height=600, num_humans=1, num_zombies=3,
+                      num_bombers=1, num_obstacles=15, num_safe_zones=1, max_steps=1000,
+                      human_health=100, zombie_health=100, human_speed=2.5,
+                      zombie_speed=1.5, bomber_speed=2.0, zombie_attack_damage=25,
+                      zombie_attack_range=12, zombie_attack_cooldown=30,
+                      threat_distance=100, explosion_radius=70, explosion_damage=100,
+                      explosion_cooldown=60, end_on_zombie_clear=True)
+
 
 class GameEngine:
     def __init__(self, config=None):
-        if config is None:
-            config = {
-                'width': 800,
-                'height': 600,
-                'num_humans': 1,
-                'num_zombies': 3,
-                'num_bombers': 1,
-                'num_obstacles': 15,
-                'num_safe_zones': 1,
-                'max_steps': 1000
-            }
-        self.config = config
+        self.config = {**DEFAULT_CONFIG, **(config or {})}
+        c = self.config
+        if c['width'] < 100 or c['height'] < 100:
+            raise ValueError('Map dimensions must be at least 100.')
+        for key in ('num_humans', 'num_zombies', 'num_bombers', 'num_obstacles', 'num_safe_zones'):
+            if not isinstance(c[key], int) or c[key] < 0:
+                raise ValueError(f'{key} must be a nonnegative integer')
+        for key in ('human_health', 'zombie_health', 'zombie_attack_range', 'zombie_attack_damage',
+                    'explosion_radius', 'explosion_damage', 'max_steps',
+                    'zombie_attack_cooldown', 'explosion_cooldown'):
+            if c[key] <= 0:
+                raise ValueError(f'{key} must be positive')
+        if c['threat_distance'] < c['zombie_attack_range']:
+            raise ValueError('threat_distance must cover zombie_attack_range')
+        self.rng = random.Random()
         self.reset()
 
-    def reset(self):
-        self.map = Map(self.config['width'], self.config['height'])
-        self.map.generate_random(self.config['num_obstacles'], self.config['num_safe_zones'])
+    def reset(self, seed=None):
+        if seed is not None:
+            self.rng.seed(int(seed))
+        c = self.config
+        self.map = Map(c['width'], c['height'])
+        self.map.generate_random(c['num_obstacles'], c['num_safe_zones'], rng=self.rng)
         self.pathfinder = PathFinder(self.map, cell_size=20)
-        
-        self.humans = []
-        self.zombies = []
-        self.bombers = []
-        self.explosions = []
-        self.arrows = []
-        self.steps = 0
-        self.outcome = None # 'victory', 'defeat', 'draw'
-        
+        self.humans, self.zombies, self.bombers = [], [], []
+        self.explosions, self.arrows, self.events = [], [], []
+        self.steps, self.outcome, self.truncated = 0, None, False
         self._spawn_entities()
+        self._update_targets()
         return self.get_state()
 
-    def _get_random_empty_pos(self, radius):
-        while True:
-            x = random.randint(radius, self.map.width - radius)
-            y = random.randint(radius, self.map.height - radius)
-            if not self.map.is_collision(x, y, radius):
+    def _get_random_empty_pos(self, radius, occupied):
+        for _ in range(10000):
+            x = self.rng.uniform(radius, self.map.width - radius)
+            y = self.rng.uniform(radius, self.map.height - radius)
+            if (not self.map.is_collision(x, y, radius)
+                    and not self.map.in_safe_zone(x, y, radius)
+                    and all(math.hypot(x-e.x, y-e.y) > radius+e.radius+2 for e in occupied)):
                 return x, y
+        raise ValueError('Cannot spawn entities: reduce obstacles/entities or increase map size.')
 
     def _spawn_entities(self):
-        for _ in range(self.config['num_humans']):
-            x, y = self._get_random_empty_pos(5)
-            self.humans.append(Human(x, y))
-            
-        for _ in range(self.config['num_zombies']):
-            x, y = self._get_random_empty_pos(5)
-            self.zombies.append(Zombie(x, y))
-            
-        for _ in range(self.config['num_bombers']):
-            x, y = self._get_random_empty_pos(6)
-            self.bombers.append(Bomber(x, y))
+        c, occupied = self.config, []
+        for i in range(c['num_humans']):
+            h = Human(*self._get_random_empty_pos(5, occupied), entity_id=i,
+                      health=c['human_health'], speed=c['human_speed'])
+            self.humans.append(h)
+            occupied.append(h)
+        for i in range(c['num_zombies']):
+            z = Zombie(*self._get_random_empty_pos(5, occupied), entity_id=i,
+                       health=c['zombie_health'], speed=c['zombie_speed'],
+                       attack_damage=c['zombie_attack_damage'], attack_range=c['zombie_attack_range'],
+                       attack_cooldown=c['zombie_attack_cooldown'])
+            self.zombies.append(z)
+            occupied.append(z)
+        for i in range(c['num_bombers']):
+            b = Bomber(*self._get_random_empty_pos(6, occupied), entity_id=i, speed=c['bomber_speed'],
+                       explosion_radius=c['explosion_radius'], explosion_damage=c['explosion_damage'],
+                       explosion_cooldown=c['explosion_cooldown'])
+            self.bombers.append(b)
+            occupied.append(b)
 
     def get_state(self):
-        # A simplified state dictionary for RL or UI
-        return {
-            'humans': self.humans,
-            'zombies': self.zombies,
-            'bombers': self.bombers,
-            'explosions': self.explosions,
-            'arrows': self.arrows,
-            'map': self.map,
-            'steps': self.steps,
-            'outcome': self.outcome
-        }
+        # Detached snapshots: UI/observation consumers cannot mutate the world or prior states.
+        return copy.deepcopy(dict(humans=self.humans, zombies=self.zombies, bombers=self.bombers,
+                                  explosions=self.explosions, arrows=self.arrows, map=self.map,
+                                  steps=self.steps, outcome=self.outcome, truncated=self.truncated,
+                                  events=tuple(self.events)))
+
+    def _update_targets(self):
+        active = [h for h in self.humans if h.is_alive and not h.escaped]
+        for z in self.zombies:
+            target = min(active, key=lambda h: (z.distance_to(h), h.id)) if active and z.is_alive else None
+            z.target = target.id if target else None
+            z.is_threatening = bool(target and z.distance_to(target) <= self.config['threat_distance'])
+
+    def _move(self, entity, dx, dy, slide=False):
+        length = math.hypot(dx, dy)
+        if not length:
+            return
+        dx, dy = dx / length * entity.speed, dy / length * entity.speed
+        for mx, my in ([(dx, dy), (dx, 0), (0, dy)] if slide else [(dx, dy)]):
+            if not self.map.is_collision(entity.x + mx, entity.y + my, entity.radius):
+                entity.x += mx
+                entity.y += my
+                return
 
     def step(self, human_actions=None, bomber_actions=None):
-        if self.outcome is not None:
+        if self.outcome is not None or self.truncated:
+            # No repeated terminal event rewards if a caller mistakenly steps again.
+            self.events = []
             return self.get_state()
-
+        human_actions, bomber_actions = human_actions or {}, bomber_actions or {}
+        self.events = []
         self.steps += 1
-        
-        # Move Humans
-        if human_actions:
-            # For simplicity, map discrete actions [0-8] to dx, dy
-            # 0: stay, 1: N, 2: NE, 3: E, 4: SE, 5: S, 6: SW, 7: W, 8: NW
-            action_map = {
-                0: (0,0), 1: (0,-1), 2: (1,-1), 3: (1,0), 4: (1,1),
-                5: (0,1), 6: (-1,1), 7: (-1,0), 8: (-1,-1)
-            }
-            for i, h in enumerate(self.humans):
-                if h.is_alive and not h.escaped:
-                    act = human_actions.get(i, 0)
-                    dx, dy = action_map.get(act, (0,0))
-                    new_x = h.x + dx * h.speed
-                    new_y = h.y + dy * h.speed
-                    if not self.map.is_collision(new_x, new_y, h.radius):
-                        h.move(dx, dy)
-                    
-                    # Check safe zone
-                    if self.map.in_safe_zone(h.x, h.y, h.radius):
-                        h.escaped = True
-
-        # Move Zombies (Rule-based A*)
+        for b in self.bombers:
+            b.update_cooldowns()
         for z in self.zombies:
-            if not z.is_alive:
-                continue
-                
-            # Find nearest active human
-            target = None
-            min_dist = float('inf')
-            for h in self.humans:
-                if h.is_alive and not h.escaped:
-                    d = z.distance_to(h)
-                    if d < min_dist:
-                        min_dist = d
-                        target = h
-            
-            if target:
-                waypoint = self.pathfinder.get_next_waypoint((z.x, z.y), (target.x, target.y))
-                if waypoint:
-                    dx = waypoint[0] - z.x
-                    dy = waypoint[1] - z.y
-                else:
-                    # Direct fallback
-                    dx = target.x - z.x
-                    dy = target.y - z.y
-                    
-                new_x = z.x + (dx/math.hypot(dx,dy) if dx!=0 or dy!=0 else 0) * z.speed
-                new_y = z.y + (dy/math.hypot(dx,dy) if dx!=0 or dy!=0 else 0) * z.speed
-                
-                if not self.map.is_collision(new_x, new_y, z.radius):
-                    z.move(dx, dy)
-                else:
-                    # Slide along walls
-                    if not self.map.is_collision(new_x, z.y, z.radius):
-                        z.move(dx, 0)
-                    elif not self.map.is_collision(z.x, new_y, z.radius):
-                        z.move(0, dy)
-
-            # Check human capture
-            for h in self.humans:
-                if h.is_alive and not h.escaped:
-                    if z.distance_to(h) <= z.radius + h.radius:
-                        h.is_alive = False
-
-        # Move Bombers and Actions
-        if bomber_actions:
-            action_map = {
-                0: (0,0), 1: (0,-1), 2: (1,-1), 3: (1,0), 4: (1,1),
-                5: (0,1), 6: (-1,1), 7: (-1,0), 8: (-1,-1)
-            }
-            for i, b in enumerate(self.bombers):
-                if b.is_alive:
-                    b.update_cooldowns()
-                    act = bomber_actions.get(i, 0) # 0-8 move, 9 explode
-                    if act <= 8:
-                        dx, dy = action_map.get(act, (0,0))
-                        new_x = b.x + dx * b.speed
-                        new_y = b.y + dy * b.speed
-                        if not self.map.is_collision(new_x, new_y, b.radius):
-                            b.move(dx, dy)
-                    elif act == 9:
-                        if b.trigger_explosion():
-                            self.explosions.append(Explosion(b.x, b.y, b.explosion_radius))
-                            
-        # Update explosions
-        active_exp = []
+            z.cooldown = max(0, z.cooldown - 1)
         for exp in self.explosions:
             exp.update()
-            if exp.active:
-                apply_explosion_damage(exp, self.zombies)
-                active_exp.append(exp)
-        self.explosions = active_exp
+        self.explosions = [e for e in self.explosions if e.active]
 
+        for h in self.humans:
+            if h.is_alive and not h.escaped:
+                self._move(h, *ACTION_MAP.get(human_actions.get(h.id, 0), (0, 0)))
+                if self.map.in_safe_zone(h.x, h.y, h.radius):
+                    h.escaped = True
+                    self.events.append(CombatEvent('human_escaped', target_id=h.id))
+
+        self._update_targets()
+        humans_by_id = {h.id: h for h in self.humans}
+        for z in self.zombies:
+            if z.target is None:
+                continue
+            target = humans_by_id[z.target]
+            if z.distance_to(target) > z.attack_range:
+                waypoint = self.pathfinder.get_next_waypoint((z.x, z.y), (target.x, target.y))
+                wx, wy = waypoint or (target.x, target.y)
+                self._move(z, wx-z.x, wy-z.y, slide=True)
+        self._update_targets()
+
+        # Each bomber resolves immediately, in stable ID order. A second bomber cannot
+        # earn credit for damage or kills already caused by the first.
+        for b in self.bombers:
+            if not b.is_alive:
+                continue
+            action = bomber_actions.get(b.id, 0)
+            if action in ACTION_MAP:
+                self._move(b, *ACTION_MAP[action])
+            elif action == 9:
+                eligible = any(z.is_alive and z.is_threatening and b.distance_to(z) <= b.explosion_radius
+                               for z in self.zombies)
+                if b.can_explode() and eligible:
+                    b.trigger_explosion()
+                    exp = Explosion(b.x, b.y, b.explosion_radius,
+                                    damage=b.explosion_damage, owner_id=b.id)
+                    self.explosions.append(exp)
+                    self.events.append(CombatEvent('explosion', actor_id=b.id))
+                    self.events.extend(apply_explosion_damage(exp, self.zombies))
+                else:
+                    self.events.append(CombatEvent('invalid_explosion', actor_id=b.id))
+
+        # Only surviving zombies may attack, so a same-step rescue is possible.
+        for z in self.zombies:
+            if not z.is_alive or z.target is None or z.cooldown > 0:
+                continue
+            h = humans_by_id[z.target]
+            if h.is_alive and not h.escaped and z.distance_to(h) <= z.attack_range:
+                damage = h.take_damage(z.attack_damage)
+                z.cooldown = z.cooldown_max
+                self.events.append(CombatEvent('human_damage', z.id, h.id, damage))
+                if not h.is_alive:
+                    self.events.append(CombatEvent('human_died', z.id, h.id))
+        self._update_targets()
         self._check_outcome()
         return self.get_state()
 
     def _check_outcome(self):
-        alive_humans = sum(1 for h in self.humans if h.is_alive and not h.escaped)
-        escaped_humans = sum(1 for h in self.humans if h.escaped)
-        total_humans_remaining = alive_humans + escaped_humans
-        
-        alive_zombies = sum(1 for z in self.zombies if z.is_alive)
-        
-        if alive_humans == 0:
-            if escaped_humans > alive_zombies:
-                self.outcome = 'victory'
-            else:
-                self.outcome = 'defeat'
-        elif alive_zombies == 0:
+        active = [h for h in self.humans if h.is_alive and not h.escaped]
+        escaped = sum(h.escaped for h in self.humans)
+        if not active:
+            self.outcome = 'victory' if escaped else 'defeat'
+        elif (self.config['end_on_zombie_clear'] and self.config['num_zombies'] > 0
+              and not any(z.is_alive for z in self.zombies)):
             self.outcome = 'victory'
         elif self.steps >= self.config['max_steps']:
-            if total_humans_remaining > alive_zombies:
-                self.outcome = 'victory'
-            elif alive_zombies > total_humans_remaining:
-                self.outcome = 'defeat'
-            else:
-                self.outcome = 'draw'
+            self.truncated = True
