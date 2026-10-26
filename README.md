@@ -1,6 +1,67 @@
-# Reinforcement-learning zombie survival
+# Cooperative Reinforcement Learning: Zombie Survival
 
-Humans learn to escape and avoid attacks. Reusable bombers learn to protect them by damaging threatening zombies. Zombies use A* pursuit and configurable attacks; they are not trained agents.
+A reproducible multi-agent reinforcement-learning environment where human agents learn to escape and reusable bomber agents learn to protect them. Zombies use deterministic A* pursuit and configurable attacks; they are part of the environment rather than trained policies.
+
+The repository focuses on the engineering around trustworthy RL experiments: deterministic resets, stable observation schemas, immutable combat events, explicit reward attribution, checkpoint compatibility, policy-vs-baseline evaluation, and regression tests that exercise real PPO updates.
+
+## System overview
+
+```mermaid
+flowchart LR
+    Config[JSON configuration] --> Engine[Deterministic game engine]
+    Engine --> HumanEnv[Human Gymnasium environment]
+    Engine --> BomberEnv[Bomber Gymnasium environment]
+    HumanEnv --> HumanPPO[Human PPO policy]
+    HumanPPO --> Frozen[Deterministic frozen human policy]
+    Frozen --> BomberEnv
+    BomberEnv --> BomberPPO[Bomber PPO policy]
+    HumanPPO --> Eval[Seeded evaluation]
+    BomberPPO --> Eval
+    Eval --> CSV[CSV metrics and plots]
+```
+
+Training is intentionally staged. Humans first learn navigation and survival; bombers then train against a frozen human policy so the protection objective does not move underneath them.
+
+## Engineering highlights
+
+- Gymnasium-compatible human and bomber environments
+- Stable-Baselines3 PPO training, checkpointing, and resume support
+- Curriculum-based human training followed by cooperative bomber training
+- A* zombie pursuit plus an obstacle-aware deterministic fallback controller
+- Versioned, fixed-size normalized observation schema
+- Event-based reward attribution for damage, kills, escapes, and deaths
+- Seeded policy-vs-random comparisons using identical episode scenarios
+- Headless training and evaluation with optional Pygame rendering
+- CSV/TensorBoard logging and result plotting
+- Deterministic tests covering environment rules and short real PPO updates
+
+## Repository layout
+
+```text
+reinforcement_learning/
+├── configs/       engine and reward configurations
+├── game/          deterministic simulation, entities, maps, and combat
+├── rl/            environments, policies, training, evaluation, plotting
+├── tests/         environment and PPO integration regression tests
+├── ui/            optional Pygame rendering
+├── logs/          reproducible smoke-run reports and evaluation output
+├── models/        checkpoints and metadata sidecars
+└── main.py        command-line entry point
+```
+
+## Quick start
+
+The smallest useful validation is:
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python -m pytest -q
+python -m rl.verify_training --timesteps 1024 --episodes 10
+```
+
+This confirms the simulation, Gymnasium environments, PPO training path, checkpoint loading, and seeded comparison pipeline. It is an integration check, not evidence that a policy has converged.
 
 ## Setup
 
