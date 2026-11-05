@@ -74,6 +74,19 @@ python -m pytest -q
 
 Use `venv/bin/python` instead of `python` if the environment is not activated. Rendering requires a display and Pygame; training and default evaluation are headless. TensorBoard logging is enabled when TensorBoard is installed (`pip install tensorboard`); CSV logging always works.
 
+### New contributor checklist
+
+Run the shortest validation before starting a long training job:
+
+```bash
+python -m pytest -q
+python -m rl.verify_training --timesteps 1024 --episodes 10
+```
+
+The test suite checks the deterministic game rules and short PPO updates. The verification command checks checkpoint loading, seeded policy-versus-baseline evaluation, and the end-to-end training path. Both commands are intended to run headlessly; a CPU-only machine is sufficient, but a full training run can take substantially longer than this smoke test.
+
+Generated checkpoints are written below `models/`, while verification logs and comparison output are written below `logs/`. Treat the smoke result as integration evidence only: it confirms that the pipeline runs, not that the learned policy has converged or is production-ready.
+
 ## Train humans, then bombers
 
 ```bash
